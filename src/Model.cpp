@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -76,6 +77,24 @@ std::string makeRefKey(const ObjRef& ref) {
     return std::to_string(ref.position) + "/" + std::to_string(ref.texCoord) + "/" + std::to_string(ref.normal);
 }
 
+bool isFinite(Vec3 value) {
+    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+bool isUsableVector(Vec3 value, float epsilon = 0.000001f) {
+    return isFinite(value) && length(value) > epsilon;
+}
+
+Vec3 fallbackTangentForNormal(Vec3 normal) {
+    normal = isUsableVector(normal) ? normalize(normal) : Vec3{0.0f, 1.0f, 0.0f};
+    const Vec3 axis = std::fabs(normal.y) < 0.999f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{0.0f, 0.0f, 1.0f};
+    Vec3 tangent = cross(axis, normal);
+    if (!isUsableVector(tangent)) {
+        tangent = {1.0f, 0.0f, 0.0f};
+    }
+    return normalize(tangent);
+}
+
 void normalizeModel(LoadedModel& model) {
     if (model.vertices.empty()) {
         return;
@@ -99,37 +118,6 @@ void normalizeModel(LoadedModel& model) {
 
     for (Vertex& vertex : model.vertices) {
         vertex.position = (vertex.position - center) * scale;
-    }
-}
-
-void generateMissingNormals(LoadedModel& model) {
-    bool allHaveNormals = true;
-    for (const Vertex& vertex : model.vertices) {
-        if (length(vertex.normal) <= 0.0001f) {
-            allHaveNormals = false;
-            break;
-        }
-    }
-    if (allHaveNormals) {
-        return;
-    }
-
-    for (Vertex& vertex : model.vertices) {
-        vertex.normal = {};
-    }
-
-    for (std::size_t index = 0; index + 2 < model.indices.size(); index += 3) {
-        Vertex& v0 = model.vertices[model.indices[index + 0]];
-        Vertex& v1 = model.vertices[model.indices[index + 1]];
-        Vertex& v2 = model.vertices[model.indices[index + 2]];
-        const Vec3 normal = normalize(cross(v1.position - v0.position, v2.position - v0.position));
-        v0.normal = v0.normal + normal;
-        v1.normal = v1.normal + normal;
-        v2.normal = v2.normal + normal;
-    }
-
-    for (Vertex& vertex : model.vertices) {
-        vertex.normal = normalize(vertex.normal);
     }
 }
 
@@ -215,11 +203,142 @@ LoadedModel loadObj(const std::filesystem::path& path) {
 
     normalizeModel(model);
     generateMissingNormals(model);
+    generateTangents(model);
     model.materialSlots.push_back({"default", 0, static_cast<std::uint32_t>(model.indices.size())});
     return model;
 }
 
 } // namespace
+
+void generateMissingNormals(LoadedModel& model) {
+    if (model.vertices.empty()) {
+        return;
+    }
+
+    bool allHaveNormals = true;
+    for (const Vertex& vertex : model.vertices) {
+        if (!isUsableVector(vertex.normal, 0.0001f)) {
+            allHaveNormals = false;
+            break;
+        }
+    }
+    if (allHaveNormals) {
+        for (Vertex& vertex : model.vertices) {
+            vertex.normal = normalize(vertex.normal);
+        }
+        return;
+    }
+
+    for (Vertex& vertex : model.vertices) {
+        vertex.normal = {};
+    }
+
+    for (std::size_t index = 0; index + 2 < model.indices.size(); index += 3) {
+        const std::uint32_t i0 = model.indices[index + 0];
+        const std::uint32_t i1 = model.indices[index + 1];
+        const std::uint32_t i2 = model.indices[index + 2];
+        if (i0 >= model.vertices.size() || i1 >= model.vertices.size() || i2 >= model.vertices.size()) {
+            continue;
+        }
+
+        Vertex& v0 = model.vertices[i0];
+        Vertex& v1 = model.vertices[i1];
+        Vertex& v2 = model.vertices[i2];
+        const Vec3 faceNormal = cross(v1.position - v0.position, v2.position - v0.position);
+        if (!isUsableVector(faceNormal)) {
+            continue;
+        }
+
+        const Vec3 normal = normalize(faceNormal);
+        v0.normal = v0.normal + normal;
+        v1.normal = v1.normal + normal;
+        v2.normal = v2.normal + normal;
+    }
+
+    for (Vertex& vertex : model.vertices) {
+        vertex.normal = isUsableVector(vertex.normal) ? normalize(vertex.normal) : Vec3{0.0f, 1.0f, 0.0f};
+    }
+}
+
+void generateTangents(LoadedModel& model) {
+    if (model.vertices.empty()) {
+        return;
+    }
+
+    generateMissingNormals(model);
+
+    std::vector<Vec3> tangentAccum(model.vertices.size());
+    std::vector<Vec3> bitangentAccum(model.vertices.size());
+
+    for (std::size_t index = 0; index + 2 < model.indices.size(); index += 3) {
+        const std::uint32_t i0 = model.indices[index + 0];
+        const std::uint32_t i1 = model.indices[index + 1];
+        const std::uint32_t i2 = model.indices[index + 2];
+        if (i0 >= model.vertices.size() || i1 >= model.vertices.size() || i2 >= model.vertices.size()) {
+            continue;
+        }
+        if (i0 == i1 || i0 == i2 || i1 == i2) {
+            continue;
+        }
+
+        const Vertex& v0 = model.vertices[i0];
+        const Vertex& v1 = model.vertices[i1];
+        const Vertex& v2 = model.vertices[i2];
+
+        const Vec3 edge1 = v1.position - v0.position;
+        const Vec3 edge2 = v2.position - v0.position;
+        if (!isUsableVector(cross(edge1, edge2))) {
+            continue;
+        }
+
+        const float du1 = v1.texCoord.x - v0.texCoord.x;
+        const float dv1 = v1.texCoord.y - v0.texCoord.y;
+        const float du2 = v2.texCoord.x - v0.texCoord.x;
+        const float dv2 = v2.texCoord.y - v0.texCoord.y;
+        const float determinant = du1 * dv2 - du2 * dv1;
+        if (std::fabs(determinant) <= 0.000001f) {
+            continue;
+        }
+
+        const float invDeterminant = 1.0f / determinant;
+        const Vec3 tangent = (edge1 * dv2 - edge2 * dv1) * invDeterminant;
+        const Vec3 bitangent = (edge2 * du1 - edge1 * du2) * invDeterminant;
+        if (!isUsableVector(tangent) || !isUsableVector(bitangent)) {
+            continue;
+        }
+
+        tangentAccum[i0] = tangentAccum[i0] + tangent;
+        tangentAccum[i1] = tangentAccum[i1] + tangent;
+        tangentAccum[i2] = tangentAccum[i2] + tangent;
+        bitangentAccum[i0] = bitangentAccum[i0] + bitangent;
+        bitangentAccum[i1] = bitangentAccum[i1] + bitangent;
+        bitangentAccum[i2] = bitangentAccum[i2] + bitangent;
+    }
+
+    for (std::size_t i = 0; i < model.vertices.size(); ++i) {
+        Vertex& vertex = model.vertices[i];
+        const Vec3 normal = isUsableVector(vertex.normal) ? normalize(vertex.normal) : Vec3{0.0f, 1.0f, 0.0f};
+
+        Vec3 tangent = tangentAccum[i];
+        if (isUsableVector(tangent)) {
+            tangent = tangent - normal * dot(normal, tangent);
+        }
+        if (!isUsableVector(tangent)) {
+            tangent = fallbackTangentForNormal(normal);
+        } else {
+            tangent = normalize(tangent);
+        }
+
+        float sign = 1.0f;
+        const Vec3 bitangent = bitangentAccum[i];
+        if (isUsableVector(bitangent) && dot(cross(normal, tangent), bitangent) < 0.0f) {
+            sign = -1.0f;
+        }
+
+        vertex.normal = normal;
+        vertex.tangent = {tangent.x, tangent.y, tangent.z, sign};
+    }
+}
 
 LoadedModel makeFallbackCube() {
     LoadedModel model;
@@ -241,6 +360,7 @@ LoadedModel makeFallbackCube() {
     addFace({-1, 1, 1}, {1, 1, 1}, {1, 1, -1}, {-1, 1, -1}, {0, 1, 0});
     addFace({-1, -1, -1}, {1, -1, -1}, {1, -1, 1}, {-1, -1, 1}, {0, -1, 0});
     model.materialSlots.push_back({"fallback", 0, static_cast<std::uint32_t>(model.indices.size())});
+    generateTangents(model);
 
     return model;
 }
@@ -266,6 +386,7 @@ LoadedModel loadModelOrFallback(const std::filesystem::path& path) {
 
             normalizeModel(model);
             generateMissingNormals(model);
+            generateTangents(model);
             return model;
         }
 

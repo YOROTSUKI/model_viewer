@@ -668,6 +668,8 @@ LoadedModel loadCastModel(const std::filesystem::path& path) {
         throw std::runtime_error("Cast file did not contain importable model or animation data");
     }
 
+    generateMissingNormals(model);
+    generateTangents(model);
     logCastSummary(model, path);
     return model;
 }

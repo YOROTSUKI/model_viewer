@@ -51,6 +51,22 @@ enum class ApexOpacityChannel : std::uint32_t {
     A,
 };
 
+enum class ApexMaterialDebugView : std::uint32_t {
+    FinalLit = 0,
+    BaseColor,
+    Normal,
+    Tangent,
+    Roughness,
+    SpecularF0,
+    AmbientOcclusion,
+    Cavity,
+    OpacityCoverage,
+    AnisotropyDirection,
+    Emissive,
+    ScatterThickness,
+    Count,
+};
+
 struct ApexMaterialParameters {
     bool enableApexMaterialMode = false;
     bool flipNormalGreen = false;
@@ -67,6 +83,7 @@ struct ApexMaterialParameters {
     float subsurfaceThicknessScale = 1.0f;
     float anisotropyStrength = 0.25f;
     Vec3 emissiveTint{1.0f, 1.0f, 1.0f};
+    ApexMaterialDebugView debugView = ApexMaterialDebugView::FinalLit;
 };
 
 struct ApexMaterialSlot {
@@ -105,12 +122,14 @@ const char* apexTextureKindName(ApexTextureKind kind);
 const char* apexAlphaModeName(ApexAlphaMode mode);
 const char* apexOpacitySourceName(ApexOpacitySource source);
 const char* apexOpacityChannelName(ApexOpacityChannel channel);
+const char* apexMaterialDebugViewName(ApexMaterialDebugView view);
 bool apexTextureKindUsesSrgb(ApexTextureKind kind);
 bool apexTextureKindPrefersNearest(ApexTextureKind kind);
 std::optional<ApexTextureKind> apexTextureKindFromToken(std::string token);
 std::optional<ApexAlphaMode> apexAlphaModeFromString(std::string value);
 std::optional<ApexOpacitySource> apexOpacitySourceFromString(std::string value);
 std::optional<ApexOpacityChannel> apexOpacityChannelFromString(std::string value);
+std::optional<ApexMaterialDebugView> apexMaterialDebugViewFromString(std::string value);
 std::optional<ApexTextureNameMatch> parseApexTextureName(const std::filesystem::path& path);
 
 ApexMaterialSet scanApexMaterialsForModel(const std::filesystem::path& modelOrDirectoryPath, const LoadedModel& model);

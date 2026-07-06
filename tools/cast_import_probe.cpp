@@ -3,11 +3,12 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <string_view>
 
 int main(int argc, char** argv) {
-    if (argc < 2) {
+    if (argc < 2 || std::string_view(argv[1]) == "--help" || std::string_view(argv[1]) == "-h") {
         std::cerr << "usage: cast_import_probe <file.cast>\n";
-        return 2;
+        return argc < 2 ? 2 : 0;
     }
 
     try {

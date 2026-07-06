@@ -9,8 +9,9 @@ This project is a small Vulkan-based model previewer scaffold for local exported
 - Renders an orbit-camera lit mesh.
 - Loads Wavefront OBJ files from the command line.
 - Loads Cast `.cast` model files, including mesh geometry, skeleton bones, skin weights, animation clips, animation curves, and notification tracks.
+- Generates per-vertex tangent space for OBJ, Cast, and fallback geometry when source tangents are unavailable.
 - Provides a Dear ImGui control panel for importing `.cast`/`.obj` files, scanning Apex-style texture folders, and tuning material parameters at runtime.
-- Scans Apex/UE Substrate-style texture names into material slots and renders them with an approximate Vulkan PBR material.
+- Scans Apex/UE Substrate-style texture names into material slots and renders them with an approximate Vulkan PBR material using normal maps, a lightweight Substrate-like slab abstraction, and approximate anisotropic GGX.
 - Falls back to an internal cube when no model path is provided.
 - Cast animation data is imported into runtime structures; skeletal playback/skinning is not rendered yet.
 
@@ -49,7 +50,9 @@ cmake --build build
 
 ## Apex Material Mode
 
-This first pass approximates the Apex Legends UE Substrate material setup without parsing Unreal `.uasset` files or depending on Unreal Engine. It reuses portable texture naming and parameter semantics, then adapts them to the viewer's Vulkan PBR shader.
+This pass approximates the Apex Legends UE Substrate material setup without parsing Unreal `.uasset` files or depending on Unreal Engine. It reuses portable texture naming and parameter semantics, then adapts them to the viewer's Vulkan PBR shader through a lightweight Substrate-like slab layer. This is still an approximation, not a full Unreal Substrate graph or compiler.
+
+OBJ, Cast, and fallback cube geometry now carry a vertex tangent with handedness. When tangents are not present in the source data, the loader generates a MikkTSpace-style approximation from position, normal, UV, and triangle indices. The shader uses vertex normal/tangent to build TBN for normal maps and keeps derivative-based TBN only as a fallback for invalid tangents.
 
 When a model is loaded, the viewer scans the model directory and nearby texture directories such as `Textures`, `textures`, `images`, `_images`, and `material`. You can also choose a texture directory explicitly with `Apex Folder` in the ImGui panel.
 
@@ -80,9 +83,11 @@ Missing maps use neutral defaults: white albedo, flat normal, 0.5 gloss, 0.04 sp
 Runtime controls are shown in the Dear ImGui `Vulkan Model Viewer` panel:
 
 - The top row has `Import Model`, `Apex Folder`, and `Rescan` actions.
-- The `Material` tab controls Apex material mode, normal green flip, roughness/specular/AO/cavity/emissive multipliers, alpha cutoff, subsurface tint/strength/thickness, and anisotropy settings.
+- The `Material` tab controls Apex material mode, normal green flip, debug view, roughness/specular/AO/cavity/emissive multipliers, alpha cutoff, subsurface tint/strength/thickness, and anisotropy settings.
 - The `Bindings` tab provides model-slot and scanned-texture-slot combo boxes for manual overrides, per-slot alpha controls, plus a material binding table showing which maps and alpha modes were detected per slot.
 - The `Log` tab shows the Apex scan log, including detected texture slots, missing maps, and unmatched material slots.
+
+Debug View can switch the material output between Final Lit, Base Color, Normal, Tangent, Roughness, Specular/F0, AO, Cavity, Opacity/Coverage, Anisotropy Direction, Emissive, and Scatter/Thickness. These views are intended to validate texture bindings, generated tangent space, normal green flip, opacity source/channel, and cheap subsurface thickness before comparing against Unreal.
 
 Parameters are saved next to the model as `<model>.apexmat.json`. The same file can include `slotOverrides` to manually map a model material slot to a scanned texture slot:
 
@@ -91,6 +96,7 @@ Parameters are saved next to the model as `<model>.apexmat.json`. The same file 
   "enableApexMaterialMode": true,
   "flipNormalGreen": false,
   "roughnessMultiplier": 1.0,
+  "debugView": "Final Lit",
   "slotOverrides": {
     "body_sknp": "horizon_mythic_v25_pilot_level03_body_sknp"
   },
@@ -116,7 +122,7 @@ Use `apex_material_probe` to validate texture detection without opening a Vulkan
 .\build\apex_material_probe.exe path\to\Textures
 ```
 
-For visual comparison, load the same mesh and texture set in Unreal with `UE-Substrate-Material-for-ApexLegends-resource`, then compare base color, normal direction, gloss/roughness response, specular intensity, AO/cavity shadowing, emissive contribution, and the cheap scatter approximation. The goal is visual proximity in this Vulkan previewer, not exact Unreal Substrate parity.
+For visual comparison, load the same mesh and texture set in Unreal with `UE-Substrate-Material-for-ApexLegends-resource`, then compare base color, normal direction, generated tangent orientation, gloss/roughness response, anisotropic direction/highlight, specular intensity, AO/cavity shadowing, emissive contribution, and the cheap scatter approximation. The anisotropic path uses a T/B/N basis and an anisotropic GGX distribution approximation, but the goal remains visual proximity in this Vulkan previewer, not exact Unreal Substrate parity.
 
 Controls:
 
@@ -133,7 +139,7 @@ The checked-in `.gitignore` excludes `exports/` because exported game/model data
 Current limitations:
 
 - Unreal `.uasset` files are intentionally not parsed.
-- The shader is an approximation, not a full Substrate implementation.
+- The shader is an approximation, not a full Substrate graph, compiler, or material layering implementation.
 - Translucent and additive materials use a weighted blended OIT approximation. Exact Unreal/Substrate translucency, refraction, and per-pixel linked-list transparency are not implemented.
 - The material descriptor table currently supports up to 16 material slots.
 - Skeletal playback/skinning is imported but not rendered yet.

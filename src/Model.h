@@ -13,6 +13,7 @@ struct Vertex {
     Vec3 position;
     Vec3 normal;
     Vec2 texCoord;
+    Vec4 tangent{1.0f, 0.0f, 0.0f, 1.0f};
 };
 
 struct VertexSkinBinding {
@@ -77,5 +78,7 @@ struct LoadedModel {
 
 LoadedModel makeFallbackCube();
 LoadedModel loadModelOrFallback(const std::filesystem::path& path);
+void generateMissingNormals(LoadedModel& model);
+void generateTangents(LoadedModel& model);
 
 } // namespace viewer

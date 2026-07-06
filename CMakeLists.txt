@@ -111,6 +111,7 @@ add_executable(cast_import_probe
     tools/cast_import_probe.cpp
     src/CastImporter.cpp
     src/CastImporter.h
+    src/Model.cpp
     src/Model.h
     src/ViewerMath.h
 )

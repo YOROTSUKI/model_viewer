@@ -67,6 +67,7 @@ private:
         Vec4 apexFactors1;
         Vec4 apexSubsurfaceColor;
         Vec4 apexEmissiveTint;
+        Vec4 apexDebug;
     };
 
     struct DrawRange {

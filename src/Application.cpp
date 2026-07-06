@@ -384,6 +384,34 @@ void Application::renderApexMaterialPanel() {
             changed |= ImGui::Checkbox("Enable Subsurface Approximation", &parameters.enableSubsurfaceApproximation);
             changed |= ImGui::Checkbox("Enable Anisotropy", &parameters.enableAnisotropy);
 
+            constexpr ApexMaterialDebugView debugViews[] = {
+                ApexMaterialDebugView::FinalLit,
+                ApexMaterialDebugView::BaseColor,
+                ApexMaterialDebugView::Normal,
+                ApexMaterialDebugView::Tangent,
+                ApexMaterialDebugView::Roughness,
+                ApexMaterialDebugView::SpecularF0,
+                ApexMaterialDebugView::AmbientOcclusion,
+                ApexMaterialDebugView::Cavity,
+                ApexMaterialDebugView::OpacityCoverage,
+                ApexMaterialDebugView::AnisotropyDirection,
+                ApexMaterialDebugView::Emissive,
+                ApexMaterialDebugView::ScatterThickness,
+            };
+            if (ImGui::BeginCombo("Debug View", apexMaterialDebugViewName(parameters.debugView))) {
+                for (ApexMaterialDebugView candidate : debugViews) {
+                    const bool selected = parameters.debugView == candidate;
+                    if (ImGui::Selectable(apexMaterialDebugViewName(candidate), selected)) {
+                        parameters.debugView = candidate;
+                        changed = true;
+                    }
+                    if (selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+
             ImGui::Spacing();
             changed |= ImGui::SliderFloat("Roughness Multiplier", &parameters.roughnessMultiplier, 0.1f, 4.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
             changed |= ImGui::SliderFloat("Specular Multiplier", &parameters.specularMultiplier, 0.0f, 4.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);

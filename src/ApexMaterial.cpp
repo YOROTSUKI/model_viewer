@@ -232,6 +232,15 @@ std::optional<bool> findJsonBool(const std::string& json, const char* name) {
     return std::nullopt;
 }
 
+std::optional<std::string> findJsonString(const std::string& json, const char* name) {
+    const std::regex pattern(std::string("\"") + name + "\"\\s*:\\s*\"([^\"]*)\"");
+    std::smatch match;
+    if (std::regex_search(json, match, pattern)) {
+        return match[1].str();
+    }
+    return std::nullopt;
+}
+
 std::optional<Vec3> findJsonVec3(const std::string& json, const char* name) {
     const std::regex pattern(std::string("\"") + name +
                              R"("\s*:\s*\[\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*,\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*,\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*\])");
@@ -471,6 +480,16 @@ ApexMaterialParameters loadApexMaterialSidecar(const std::filesystem::path& side
     if (auto value = findJsonVec3(json, "emissiveTint")) {
         parameters.emissiveTint = *value;
     }
+    if (auto debugViewString = findJsonString(json, "debugView")) {
+        if (auto view = apexMaterialDebugViewFromString(*debugViewString)) {
+            parameters.debugView = *view;
+        }
+    } else if (auto debugViewNumber = findJsonNumber(json, "debugView")) {
+        const auto index = static_cast<std::uint32_t>(*debugViewNumber);
+        if (index < static_cast<std::uint32_t>(ApexMaterialDebugView::Count)) {
+            parameters.debugView = static_cast<ApexMaterialDebugView>(index);
+        }
+    }
 
     logLines.push_back("[ApexMaterial] loaded sidecar: " + sidecarPath.string());
     return parameters;
@@ -560,6 +579,38 @@ const char* apexOpacityChannelName(ApexOpacityChannel channel) {
     return "R";
 }
 
+const char* apexMaterialDebugViewName(ApexMaterialDebugView view) {
+    switch (view) {
+    case ApexMaterialDebugView::FinalLit:
+        return "Final Lit";
+    case ApexMaterialDebugView::BaseColor:
+        return "Base Color";
+    case ApexMaterialDebugView::Normal:
+        return "Normal";
+    case ApexMaterialDebugView::Tangent:
+        return "Tangent";
+    case ApexMaterialDebugView::Roughness:
+        return "Roughness";
+    case ApexMaterialDebugView::SpecularF0:
+        return "Specular/F0";
+    case ApexMaterialDebugView::AmbientOcclusion:
+        return "AO";
+    case ApexMaterialDebugView::Cavity:
+        return "Cavity";
+    case ApexMaterialDebugView::OpacityCoverage:
+        return "Opacity/Coverage";
+    case ApexMaterialDebugView::AnisotropyDirection:
+        return "Anisotropy Direction";
+    case ApexMaterialDebugView::Emissive:
+        return "Emissive";
+    case ApexMaterialDebugView::ScatterThickness:
+        return "Scatter/Thickness";
+    case ApexMaterialDebugView::Count:
+        break;
+    }
+    return "Final Lit";
+}
+
 bool apexTextureKindUsesSrgb(ApexTextureKind kind) {
     return kind == ApexTextureKind::Albedo ||
            kind == ApexTextureKind::Emissive;
@@ -626,6 +677,53 @@ std::optional<ApexOpacityChannel> apexOpacityChannelFromString(std::string value
     }
     if (value == "a" || value == "alpha" || value == "3") {
         return ApexOpacityChannel::A;
+    }
+    return std::nullopt;
+}
+
+std::optional<ApexMaterialDebugView> apexMaterialDebugViewFromString(std::string value) {
+    value = toLower(std::move(value));
+    value.erase(
+        std::remove_if(value.begin(), value.end(), [](unsigned char ch) {
+            return ch == ' ' || ch == '_' || ch == '-' || ch == '/';
+        }),
+        value.end());
+
+    if (value == "finallit" || value == "final") {
+        return ApexMaterialDebugView::FinalLit;
+    }
+    if (value == "basecolor" || value == "albedo") {
+        return ApexMaterialDebugView::BaseColor;
+    }
+    if (value == "normal") {
+        return ApexMaterialDebugView::Normal;
+    }
+    if (value == "tangent") {
+        return ApexMaterialDebugView::Tangent;
+    }
+    if (value == "roughness") {
+        return ApexMaterialDebugView::Roughness;
+    }
+    if (value == "specularf0" || value == "specular") {
+        return ApexMaterialDebugView::SpecularF0;
+    }
+    if (value == "ao" || value == "ambientocclusion") {
+        return ApexMaterialDebugView::AmbientOcclusion;
+    }
+    if (value == "cavity") {
+        return ApexMaterialDebugView::Cavity;
+    }
+    if (value == "opacitycoverage" || value == "opacity" || value == "coverage") {
+        return ApexMaterialDebugView::OpacityCoverage;
+    }
+    if (value == "anisotropydirection" || value == "aniso") {
+        return ApexMaterialDebugView::AnisotropyDirection;
+    }
+    if (value == "emissive") {
+        return ApexMaterialDebugView::Emissive;
+    }
+    if (value == "scatterthickness" || value == "scatter" || value == "thickness") {
+        return ApexMaterialDebugView::ScatterThickness;
     }
     return std::nullopt;
 }
@@ -942,6 +1040,7 @@ void saveApexMaterialSidecar(const ApexMaterialSet& materialSet) {
     output << "  \"enableAnisotropy\": " << (p.enableAnisotropy ? "true" : "false") << ",\n";
     output << "  \"anisotropyStrength\": " << p.anisotropyStrength << ",\n";
     output << "  \"emissiveTint\": [" << p.emissiveTint.x << ", " << p.emissiveTint.y << ", " << p.emissiveTint.z << "],\n";
+    output << "  \"debugView\": \"" << apexMaterialDebugViewName(p.debugView) << "\",\n";
     output << "  \"slotOverrides\": {\n";
 
     std::size_t index = 0;
