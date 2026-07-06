@@ -13,7 +13,7 @@ struct Vertex {
     Vec3 position;
     Vec3 normal;
     Vec2 texCoord;
-    Vec4 tangent{1.0f, 0.0f, 0.0f, 1.0f};
+    Vec4 tangent{0.0f, 0.0f, 0.0f, 0.0f};
 };
 
 struct VertexSkinBinding {

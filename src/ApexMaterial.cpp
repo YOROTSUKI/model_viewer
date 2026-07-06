@@ -598,13 +598,17 @@ const char* apexMaterialDebugViewName(ApexMaterialDebugView view) {
     case ApexMaterialDebugView::Cavity:
         return "Cavity";
     case ApexMaterialDebugView::OpacityCoverage:
-        return "Opacity/Coverage";
+        return "Coverage";
     case ApexMaterialDebugView::AnisotropyDirection:
         return "Anisotropy Direction";
     case ApexMaterialDebugView::Emissive:
         return "Emissive";
     case ApexMaterialDebugView::ScatterThickness:
-        return "Scatter/Thickness";
+        return "Thickness";
+    case ApexMaterialDebugView::TangentValidity:
+        return "Tangent Validity";
+    case ApexMaterialDebugView::Transmittance:
+        return "Transmittance";
     case ApexMaterialDebugView::Count:
         break;
     }
@@ -724,6 +728,12 @@ std::optional<ApexMaterialDebugView> apexMaterialDebugViewFromString(std::string
     }
     if (value == "scatterthickness" || value == "scatter" || value == "thickness") {
         return ApexMaterialDebugView::ScatterThickness;
+    }
+    if (value == "tangentvalidity" || value == "tangentvalid" || value == "tangentfallback") {
+        return ApexMaterialDebugView::TangentValidity;
+    }
+    if (value == "transmittance" || value == "transmission") {
+        return ApexMaterialDebugView::Transmittance;
     }
     return std::nullopt;
 }

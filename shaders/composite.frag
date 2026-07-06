@@ -8,6 +8,15 @@ layout(input_attachment_index = 3, binding = 3) uniform subpassInput additiveInp
 layout(location = 0) in vec2 inUv;
 layout(location = 0) out vec4 outColor;
 
+vec3 toneMapLinearHdr(vec3 color) {
+    color = max(color, vec3(0.0));
+    return color / (color + vec3(1.0));
+}
+
+vec3 linearToDisplay(vec3 color) {
+    return pow(clamp(color, vec3(0.0), vec3(1.0)), vec3(1.0 / 2.2));
+}
+
 void main() {
     vec4 opaqueColor = subpassLoad(opaqueColorInput);
     vec4 accum = subpassLoad(accumInput);
@@ -18,5 +27,5 @@ void main() {
     vec3 transparentColor = accum.a > 0.00001 ? accum.rgb / accum.a : vec3(0.0);
     vec3 color = opaqueColor.rgb * revealage + transparentColor * transparentAlpha + additive;
 
-    outColor = vec4(clamp(color, vec3(0.0), vec3(1.0)), 1.0);
+    outColor = vec4(linearToDisplay(toneMapLinearHdr(color)), 1.0);
 }

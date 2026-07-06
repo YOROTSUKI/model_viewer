@@ -64,6 +64,11 @@ set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/composite.frag"
 )
 
+set(SHADER_INCLUDE_SOURCES
+    "${SHADER_SOURCE_DIR}/apex_material_constants.glsl"
+    "${SHADER_SOURCE_DIR}/apex_material_common.glsl"
+)
+
 set(SHADER_OUTPUTS)
 foreach(shader ${SHADER_SOURCES})
     get_filename_component(shader_name "${shader}" NAME)
@@ -71,8 +76,8 @@ foreach(shader ${SHADER_SOURCES})
     list(APPEND SHADER_OUTPUTS "${output}")
     add_custom_command(
         OUTPUT "${output}"
-        COMMAND "${GLSLC_EXECUTABLE}" "${shader}" -o "${output}"
-        DEPENDS "${shader}"
+        COMMAND "${GLSLC_EXECUTABLE}" -I "${SHADER_SOURCE_DIR}" "${shader}" -o "${output}"
+        DEPENDS "${shader}" ${SHADER_INCLUDE_SOURCES}
         VERBATIM
     )
 endforeach()

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -83,16 +84,6 @@ bool isFinite(Vec3 value) {
 
 bool isUsableVector(Vec3 value, float epsilon = 0.000001f) {
     return isFinite(value) && length(value) > epsilon;
-}
-
-Vec3 fallbackTangentForNormal(Vec3 normal) {
-    normal = isUsableVector(normal) ? normalize(normal) : Vec3{0.0f, 1.0f, 0.0f};
-    const Vec3 axis = std::fabs(normal.y) < 0.999f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{0.0f, 0.0f, 1.0f};
-    Vec3 tangent = cross(axis, normal);
-    if (!isUsableVector(tangent)) {
-        tangent = {1.0f, 0.0f, 0.0f};
-    }
-    return normalize(tangent);
 }
 
 void normalizeModel(LoadedModel& model) {
@@ -267,10 +258,19 @@ void generateTangents(LoadedModel& model) {
 
     generateMissingNormals(model);
 
-    std::vector<Vec3> tangentAccum(model.vertices.size());
-    std::vector<Vec3> bitangentAccum(model.vertices.size());
+    struct TriangleTangent {
+        Vec3 tangent{};
+        Vec3 bitangent{};
+        float sign = 1.0f;
+        bool valid = false;
+    };
 
-    for (std::size_t index = 0; index + 2 < model.indices.size(); index += 3) {
+    const std::size_t originalVertexCount = model.vertices.size();
+    const std::size_t triangleCount = model.indices.size() / 3;
+    std::vector<TriangleTangent> triangleTangents(triangleCount);
+
+    for (std::size_t triangleIndex = 0; triangleIndex < triangleCount; ++triangleIndex) {
+        const std::size_t index = triangleIndex * 3;
         const std::uint32_t i0 = model.indices[index + 0];
         const std::uint32_t i1 = model.indices[index + 1];
         const std::uint32_t i2 = model.indices[index + 2];
@@ -287,7 +287,8 @@ void generateTangents(LoadedModel& model) {
 
         const Vec3 edge1 = v1.position - v0.position;
         const Vec3 edge2 = v2.position - v0.position;
-        if (!isUsableVector(cross(edge1, edge2))) {
+        const Vec3 faceNormal = cross(edge1, edge2);
+        if (!isUsableVector(faceNormal)) {
             continue;
         }
 
@@ -307,12 +308,91 @@ void generateTangents(LoadedModel& model) {
             continue;
         }
 
-        tangentAccum[i0] = tangentAccum[i0] + tangent;
-        tangentAccum[i1] = tangentAccum[i1] + tangent;
-        tangentAccum[i2] = tangentAccum[i2] + tangent;
-        bitangentAccum[i0] = bitangentAccum[i0] + bitangent;
-        bitangentAccum[i1] = bitangentAccum[i1] + bitangent;
-        bitangentAccum[i2] = bitangentAccum[i2] + bitangent;
+        Vec3 signNormal = v0.normal + v1.normal + v2.normal;
+        signNormal = isUsableVector(signNormal) ? normalize(signNormal) : normalize(faceNormal);
+
+        TriangleTangent& triangle = triangleTangents[triangleIndex];
+        triangle.tangent = tangent;
+        triangle.bitangent = bitangent;
+        triangle.sign = dot(cross(signNormal, tangent), bitangent) < 0.0f ? -1.0f : 1.0f;
+        triangle.valid = true;
+    }
+
+    constexpr std::uint32_t invalidIndex = std::numeric_limits<std::uint32_t>::max();
+    struct HandednessVertices {
+        std::uint32_t positive;
+        std::uint32_t negative;
+    };
+
+    std::vector<HandednessVertices> handednessVertices(originalVertexCount, {invalidIndex, invalidIndex});
+    std::size_t mirroredConflictSplits = 0;
+
+    const auto duplicateVertex = [&model, originalVertexCount](std::uint32_t originalIndex) -> std::uint32_t {
+        if (originalIndex >= originalVertexCount || originalIndex >= model.vertices.size()) {
+            return originalIndex;
+        }
+        if (model.vertices.size() >= std::numeric_limits<std::uint32_t>::max()) {
+            throw std::runtime_error("model has too many vertices to split tangent handedness conflicts");
+        }
+
+        const std::uint32_t duplicateIndex = static_cast<std::uint32_t>(model.vertices.size());
+        model.vertices.push_back(model.vertices[originalIndex]);
+        if (!model.skinBindings.empty()) {
+            if (originalIndex < model.skinBindings.size()) {
+                model.skinBindings.push_back(model.skinBindings[originalIndex]);
+            } else {
+                model.skinBindings.push_back({});
+            }
+        }
+        return duplicateIndex;
+    };
+
+    for (std::size_t triangleIndex = 0; triangleIndex < triangleCount; ++triangleIndex) {
+        const TriangleTangent& triangle = triangleTangents[triangleIndex];
+        if (!triangle.valid) {
+            continue;
+        }
+
+        const std::size_t index = triangleIndex * 3;
+        for (std::size_t corner = 0; corner < 3; ++corner) {
+            const std::uint32_t originalIndex = model.indices[index + corner];
+            if (originalIndex >= originalVertexCount) {
+                continue;
+            }
+
+            HandednessVertices& vertices = handednessVertices[originalIndex];
+            std::uint32_t& sameSignVertex = triangle.sign < 0.0f ? vertices.negative : vertices.positive;
+            const std::uint32_t oppositeSignVertex = triangle.sign < 0.0f ? vertices.positive : vertices.negative;
+            if (sameSignVertex == invalidIndex) {
+                if (oppositeSignVertex == invalidIndex) {
+                    sameSignVertex = originalIndex;
+                } else {
+                    sameSignVertex = duplicateVertex(originalIndex);
+                    ++mirroredConflictSplits;
+                }
+            }
+            model.indices[index + corner] = sameSignVertex;
+        }
+    }
+
+    std::vector<Vec3> tangentAccum(model.vertices.size());
+    std::vector<Vec3> bitangentAccum(model.vertices.size());
+
+    for (std::size_t triangleIndex = 0; triangleIndex < triangleCount; ++triangleIndex) {
+        const TriangleTangent& triangle = triangleTangents[triangleIndex];
+        if (!triangle.valid) {
+            continue;
+        }
+
+        const std::size_t index = triangleIndex * 3;
+        for (std::size_t corner = 0; corner < 3; ++corner) {
+            const std::uint32_t vertexIndex = model.indices[index + corner];
+            if (vertexIndex >= model.vertices.size()) {
+                continue;
+            }
+            tangentAccum[vertexIndex] = tangentAccum[vertexIndex] + triangle.tangent;
+            bitangentAccum[vertexIndex] = bitangentAccum[vertexIndex] + triangle.bitangent;
+        }
     }
 
     for (std::size_t i = 0; i < model.vertices.size(); ++i) {
@@ -324,7 +404,9 @@ void generateTangents(LoadedModel& model) {
             tangent = tangent - normal * dot(normal, tangent);
         }
         if (!isUsableVector(tangent)) {
-            tangent = fallbackTangentForNormal(normal);
+            vertex.normal = normal;
+            vertex.tangent = {0.0f, 0.0f, 0.0f, 0.0f};
+            continue;
         } else {
             tangent = normalize(tangent);
         }
@@ -337,6 +419,12 @@ void generateTangents(LoadedModel& model) {
 
         vertex.normal = normal;
         vertex.tangent = {tangent.x, tangent.y, tangent.z, sign};
+    }
+
+    if (mirroredConflictSplits > 0) {
+        std::cerr << "Tangent generation split " << mirroredConflictSplits
+                  << " mirrored-UV handedness conflict vertex corner(s); vertices "
+                  << originalVertexCount << " -> " << model.vertices.size() << ".\n";
     }
 }
 

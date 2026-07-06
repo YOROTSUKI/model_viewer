@@ -52,6 +52,7 @@ enum class ApexOpacityChannel : std::uint32_t {
 };
 
 enum class ApexMaterialDebugView : std::uint32_t {
+    // Keep these values in sync with shaders/apex_material_constants.glsl.
     FinalLit = 0,
     BaseColor,
     Normal,
@@ -64,6 +65,8 @@ enum class ApexMaterialDebugView : std::uint32_t {
     AnisotropyDirection,
     Emissive,
     ScatterThickness,
+    TangentValidity,
+    Transmittance,
     Count,
 };
 

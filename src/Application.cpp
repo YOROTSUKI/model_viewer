@@ -389,6 +389,7 @@ void Application::renderApexMaterialPanel() {
                 ApexMaterialDebugView::BaseColor,
                 ApexMaterialDebugView::Normal,
                 ApexMaterialDebugView::Tangent,
+                ApexMaterialDebugView::TangentValidity,
                 ApexMaterialDebugView::Roughness,
                 ApexMaterialDebugView::SpecularF0,
                 ApexMaterialDebugView::AmbientOcclusion,
@@ -397,6 +398,7 @@ void Application::renderApexMaterialPanel() {
                 ApexMaterialDebugView::AnisotropyDirection,
                 ApexMaterialDebugView::Emissive,
                 ApexMaterialDebugView::ScatterThickness,
+                ApexMaterialDebugView::Transmittance,
             };
             if (ImGui::BeginCombo("Debug View", apexMaterialDebugViewName(parameters.debugView))) {
                 for (ApexMaterialDebugView candidate : debugViews) {

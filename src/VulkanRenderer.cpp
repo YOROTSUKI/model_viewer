@@ -756,7 +756,7 @@ void VulkanRenderer::createRenderPass() {
     depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
     VkAttachmentDescription opaqueColorAttachment{};
-    opaqueColorAttachment.format = swapChainImageFormat_;
+    opaqueColorAttachment.format = transparencyAccumFormat_;
     opaqueColorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
     opaqueColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     opaqueColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -1542,7 +1542,7 @@ void VulkanRenderer::createTransparencyResources() {
     };
 
     for (TransparencyFramebufferResources& resources : transparencyResources_) {
-        createAttachment(swapChainImageFormat_, resources.opaqueColor);
+        createAttachment(transparencyAccumFormat_, resources.opaqueColor);
         createAttachment(transparencyAccumFormat_, resources.accum);
         createAttachment(transparencyRevealFormat_, resources.reveal);
         createAttachment(transparencyAccumFormat_, resources.additive);
@@ -2393,6 +2393,18 @@ bool VulkanRenderer::checkDeviceExtensionSupport(VkPhysicalDevice device) const 
 }
 
 VkSurfaceFormatKHR VulkanRenderer::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats) const {
+    for (const auto& availableFormat : formats) {
+        if (availableFormat.format == VK_FORMAT_B8G8R8A8_UNORM &&
+            availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            return availableFormat;
+        }
+    }
+    for (const auto& availableFormat : formats) {
+        if (availableFormat.format == VK_FORMAT_R8G8B8A8_UNORM &&
+            availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            return availableFormat;
+        }
+    }
     for (const auto& availableFormat : formats) {
         if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB &&
             availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {

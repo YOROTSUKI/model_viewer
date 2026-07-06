@@ -11,7 +11,8 @@ This project is a small Vulkan-based model previewer scaffold for local exported
 - Loads Cast `.cast` model files, including mesh geometry, skeleton bones, skin weights, animation clips, animation curves, and notification tracks.
 - Generates per-vertex tangent space for OBJ, Cast, and fallback geometry when source tangents are unavailable.
 - Provides a Dear ImGui control panel for importing `.cast`/`.obj` files, scanning Apex-style texture folders, and tuning material parameters at runtime.
-- Scans Apex/UE Substrate-style texture names into material slots and renders them with an approximate Vulkan PBR material using normal maps, a lightweight Substrate-like slab abstraction, and approximate anisotropic GGX.
+- Scans Apex/UE Substrate-style texture names into material slots and renders them with an approximate Vulkan PBR material using normal maps, shared Apex/Substrate-like shader includes, a lightweight slab abstraction, and approximate anisotropic GGX.
+- Keeps material evaluation, opaque output, and weighted blended transparent accumulation in linear HDR; the composite pass performs final tone mapping and display gamma/sRGB conversion.
 - Falls back to an internal cube when no model path is provided.
 - Cast animation data is imported into runtime structures; skeletal playback/skinning is not rendered yet.
 
@@ -52,7 +53,13 @@ cmake --build build
 
 This pass approximates the Apex Legends UE Substrate material setup without parsing Unreal `.uasset` files or depending on Unreal Engine. It reuses portable texture naming and parameter semantics, then adapts them to the viewer's Vulkan PBR shader through a lightweight Substrate-like slab layer. This is still an approximation, not a full Unreal Substrate graph or compiler.
 
-OBJ, Cast, and fallback cube geometry now carry a vertex tangent with handedness. When tangents are not present in the source data, the loader generates a MikkTSpace-style approximation from position, normal, UV, and triangle indices. The shader uses vertex normal/tangent to build TBN for normal maps and keeps derivative-based TBN only as a fallback for invalid tangents.
+The opaque and transparent fragment shaders share the Apex material sampling, tangent-frame, anisotropic GGX, debug-view, and Substrate-like slab helper code through `shaders/apex_material_common.glsl`, with constants centralized in `shaders/apex_material_constants.glsl`.
+
+OBJ, Cast, and fallback cube geometry now carry a vertex tangent with handedness. When tangents are not present in the source data, the loader generates a MikkTSpace-style approximation from position, normal, UV, and triangle indices. Valid UV-derived tangents use `tangent.w` as handedness; invalid or degenerate UV cases keep `tangent.w == 0` so the shader can use derivative-based TBN. Mirrored UV handedness conflicts are split into separate vertices while preserving material index ranges and skin bindings.
+
+Material shading is evaluated in linear HDR. Opaque output, translucent weighted blended OIT accumulation, and additive accumulation stay linear; `shaders/composite.frag` combines the intermediate attachments and applies the final tone map plus display gamma/sRGB transform.
+
+Opacity/alpha/mask texture data now feeds slab `coverage`, which drives masked discard, translucent OIT revealage, and additive intensity. Scatter/thickness maps feed a separate cheap Beer-Lambert `transmittance` approximation derived from the existing subsurface tint/strength controls because the scan path does not provide real Substrate mean free path data. This is a visual Substrate-like transmittance approximation, not full UE Substrate.
 
 When a model is loaded, the viewer scans the model directory and nearby texture directories such as `Textures`, `textures`, `images`, `_images`, and `material`. You can also choose a texture directory explicitly with `Apex Folder` in the ImGui panel.
 
@@ -87,7 +94,7 @@ Runtime controls are shown in the Dear ImGui `Vulkan Model Viewer` panel:
 - The `Bindings` tab provides model-slot and scanned-texture-slot combo boxes for manual overrides, per-slot alpha controls, plus a material binding table showing which maps and alpha modes were detected per slot.
 - The `Log` tab shows the Apex scan log, including detected texture slots, missing maps, and unmatched material slots.
 
-Debug View can switch the material output between Final Lit, Base Color, Normal, Tangent, Roughness, Specular/F0, AO, Cavity, Opacity/Coverage, Anisotropy Direction, Emissive, and Scatter/Thickness. These views are intended to validate texture bindings, generated tangent space, normal green flip, opacity source/channel, and cheap subsurface thickness before comparing against Unreal.
+Debug View can switch the material output between Final Lit, Base Color, Normal, Tangent, Tangent Validity, Roughness, Specular/F0, AO, Cavity, Coverage, Anisotropy Direction, Emissive, Thickness, and Transmittance. Tangent Validity highlights valid UV-derived tangent frames separately from derivative/fallback frames, which helps diagnose UV seams, mirrored UVs, and degenerate tangent generation. The Coverage, Thickness, and Transmittance views validate the initial split between alpha coverage and cheap subsurface transmission before comparing against Unreal.
 
 Parameters are saved next to the model as `<model>.apexmat.json`. The same file can include `slotOverrides` to manually map a model material slot to a scanned texture slot:
 
@@ -140,6 +147,7 @@ Current limitations:
 
 - Unreal `.uasset` files are intentionally not parsed.
 - The shader is an approximation, not a full Substrate graph, compiler, or material layering implementation.
+- Coverage and transmittance are only initially separated; the transmittance path is a cheap Beer-Lambert visual approximation, not UE's full Substrate medium model.
 - Translucent and additive materials use a weighted blended OIT approximation. Exact Unreal/Substrate translucency, refraction, and per-pixel linked-list transparency are not implemented.
 - The material descriptor table currently supports up to 16 material slots.
 - Skeletal playback/skinning is imported but not rendered yet.
