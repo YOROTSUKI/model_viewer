@@ -1,0 +1,21 @@
+exports/
+
+# Build outputs
+build/
+out/
+CMakeUserPresets.json
+
+# IDE/editor state
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Runtime artifacts
+*.log
+
+# Local compiler outputs
+*.obj
+*.exe
+*.pdb
+*.ilk
