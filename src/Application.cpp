@@ -383,6 +383,11 @@ void Application::renderApexMaterialPanel() {
             changed |= ImGui::Checkbox("Flip Normal Green", &parameters.flipNormalGreen);
             changed |= ImGui::Checkbox("Enable Subsurface Approximation", &parameters.enableSubsurfaceApproximation);
             changed |= ImGui::Checkbox("Enable Anisotropy", &parameters.enableAnisotropy);
+            bool loadSavedMaterialParameters = apexMaterialSet_.loadSavedMaterialParameters;
+            if (ImGui::Checkbox("Load Saved Params On Startup", &loadSavedMaterialParameters)) {
+                apexMaterialSet_.loadSavedMaterialParameters = loadSavedMaterialParameters;
+                saveApexMaterialSidecar(apexMaterialSet_);
+            }
 
             constexpr ApexMaterialDebugView debugViews[] = {
                 ApexMaterialDebugView::FinalLit,
@@ -399,6 +404,10 @@ void Application::renderApexMaterialPanel() {
                 ApexMaterialDebugView::Emissive,
                 ApexMaterialDebugView::ScatterThickness,
                 ApexMaterialDebugView::Transmittance,
+                ApexMaterialDebugView::MeanFreePath,
+                ApexMaterialDebugView::MediumThickness,
+                ApexMaterialDebugView::ClosureCount,
+                ApexMaterialDebugView::LayeredTransmittance,
             };
             if (ImGui::BeginCombo("Debug View", apexMaterialDebugViewName(parameters.debugView))) {
                 for (ApexMaterialDebugView candidate : debugViews) {
@@ -424,6 +433,11 @@ void Application::renderApexMaterialPanel() {
             changed |= ImGui::SliderFloat("Subsurface Strength", &parameters.subsurfaceStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
             changed |= ImGui::SliderFloat("Thickness Scale", &parameters.subsurfaceThicknessScale, 0.0f, 5.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
             changed |= ImGui::SliderFloat("Anisotropy Strength", &parameters.anisotropyStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            int substrateMaxClosureCount = static_cast<int>(parameters.substrateMaxClosureCount);
+            if (ImGui::SliderInt("Substrate Max Closures", &substrateMaxClosureCount, 1, 4, "%d", ImGuiSliderFlags_AlwaysClamp)) {
+                parameters.substrateMaxClosureCount = static_cast<std::uint32_t>(std::clamp(substrateMaxClosureCount, 1, 4));
+                changed = true;
+            }
 
             float subsurfaceColor[] = {
                 parameters.subsurfaceColor.x,

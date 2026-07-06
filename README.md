@@ -51,15 +51,19 @@ cmake --build build
 
 ## Apex Material Mode
 
-This pass approximates the Apex Legends UE Substrate material setup without parsing Unreal `.uasset` files or depending on Unreal Engine. It reuses portable texture naming and parameter semantics, then adapts them to the viewer's Vulkan PBR shader through a lightweight Substrate-like slab layer. This is still an approximation, not a full Unreal Substrate graph or compiler.
+This pass approximates the Apex Legends UE Substrate material setup without parsing Unreal `.uasset` files or depending on Unreal Engine. It reuses portable texture naming and parameter semantics, then adapts them to the viewer's Vulkan PBR shader through a lightweight Substrate-like graph/layer evaluator. This is still an approximation, not a full Unreal Substrate graph or compiler.
 
 The opaque and transparent fragment shaders share the Apex material sampling, tangent-frame, anisotropic GGX, debug-view, and Substrate-like slab helper code through `shaders/apex_material_common.glsl`, with constants centralized in `shaders/apex_material_constants.glsl`.
+
+The shader-side material path is organized as `ApexMaterialSample` texture data, `SubstrateMediumApprox` transmission data, `SubstrateSlabApprox` closure parameters, and `SubstrateEvalResult` final evaluated output. The current graph preset builds one base Apex slab, attaches optional cheap medium/transmission data from thickness/scatter controls, and leaves a small vertical-layer placeholder for future coating work.
+
+Supported simplified Substrate-style operators are `applyCoverageWeight`, `horizontalBlendSlabs`, and `verticalLayerSlabs`. They use parameter blending and Beer-Lambert-style transmittance instead of UE's full multi-closure evaluation. `Substrate Max Closures` controls the current simplification budget: `1` keeps the parameter-blended single slab path, while `2+` enables the vertical-layer approximation path.
 
 OBJ, Cast, and fallback cube geometry now carry a vertex tangent with handedness. When tangents are not present in the source data, the loader generates a MikkTSpace-style approximation from position, normal, UV, and triangle indices. Valid UV-derived tangents use `tangent.w` as handedness; invalid or degenerate UV cases keep `tangent.w == 0` so the shader can use derivative-based TBN. Mirrored UV handedness conflicts are split into separate vertices while preserving material index ranges and skin bindings.
 
 Material shading is evaluated in linear HDR. Opaque output, translucent weighted blended OIT accumulation, and additive accumulation stay linear; `shaders/composite.frag` combines the intermediate attachments and applies the final tone map plus display gamma/sRGB transform.
 
-Opacity/alpha/mask texture data now feeds slab `coverage`, which drives masked discard, translucent OIT revealage, and additive intensity. Scatter/thickness maps feed a separate cheap Beer-Lambert `transmittance` approximation derived from the existing subsurface tint/strength controls because the scan path does not provide real Substrate mean free path data. This is a visual Substrate-like transmittance approximation, not full UE Substrate.
+Opacity/alpha/mask texture data feeds slab `coverage`, which drives masked discard, translucent OIT revealage, and additive intensity. Scatter/thickness maps feed `SubstrateMediumApprox` with explicit mean free path, medium thickness, and Beer-Lambert `transmittance` fields derived from the existing subsurface tint/strength controls because the scan path does not provide real Substrate mean free path data. Coverage and transmittance are separate concepts in the shader even when they are driven by nearby Apex texture inputs.
 
 When a model is loaded, the viewer scans the model directory and nearby texture directories such as `Textures`, `textures`, `images`, `_images`, and `material`. You can also choose a texture directory explicitly with `Apex Folder` in the ImGui panel.
 
@@ -90,19 +94,21 @@ Missing maps use neutral defaults: white albedo, flat normal, 0.5 gloss, 0.04 sp
 Runtime controls are shown in the Dear ImGui `Vulkan Model Viewer` panel:
 
 - The top row has `Import Model`, `Apex Folder`, and `Rescan` actions.
-- The `Material` tab controls Apex material mode, normal green flip, debug view, roughness/specular/AO/cavity/emissive multipliers, alpha cutoff, subsurface tint/strength/thickness, and anisotropy settings.
+- The `Material` tab controls Apex material mode, normal green flip, debug view, roughness/specular/AO/cavity/emissive multipliers, alpha cutoff, subsurface tint/strength/thickness, anisotropy settings, and the simplified Substrate max closure budget.
 - The `Bindings` tab provides model-slot and scanned-texture-slot combo boxes for manual overrides, per-slot alpha controls, plus a material binding table showing which maps and alpha modes were detected per slot.
 - The `Log` tab shows the Apex scan log, including detected texture slots, missing maps, and unmatched material slots.
 
-Debug View can switch the material output between Final Lit, Base Color, Normal, Tangent, Tangent Validity, Roughness, Specular/F0, AO, Cavity, Coverage, Anisotropy Direction, Emissive, Thickness, and Transmittance. Tangent Validity highlights valid UV-derived tangent frames separately from derivative/fallback frames, which helps diagnose UV seams, mirrored UVs, and degenerate tangent generation. The Coverage, Thickness, and Transmittance views validate the initial split between alpha coverage and cheap subsurface transmission before comparing against Unreal.
+Debug View can switch the material output between Final Lit, Base Color, Normal, Tangent, Tangent Validity, Roughness, Specular/F0, AO, Cavity, Coverage, Anisotropy Direction, Emissive, Thickness, Transmittance, Mean Free Path, Medium Thickness, Closure Count, and Layered Transmittance. Tangent Validity highlights valid UV-derived tangent frames separately from derivative/fallback frames, which helps diagnose UV seams, mirrored UVs, and degenerate tangent generation. The Coverage, medium, transmittance, and closure-count views validate the split between alpha coverage, cheap subsurface transmission, and the active single-slab vs layered approximation path before comparing against Unreal.
 
-Parameters are saved next to the model as `<model>.apexmat.json`. The same file can include `slotOverrides` to manually map a model material slot to a scanned texture slot:
+Parameters are saved next to the model as `<model>.apexmat.json`. By default, startup uses the program's current material defaults and does not reuse previously saved slider values; set `startupParameters` to `Saved` or enable `Load Saved Params On Startup` in the Material tab when you want the saved values to be reused. The same file can include `slotOverrides` to manually map a model material slot to a scanned texture slot:
 
 ```json
 {
+  "startupParameters": "Defaults",
   "enableApexMaterialMode": true,
   "flipNormalGreen": false,
-  "roughnessMultiplier": 1.0,
+  "roughnessMultiplier": 2.31,
+  "substrateMaxClosureCount": 1,
   "debugView": "Final Lit",
   "slotOverrides": {
     "body_sknp": "horizon_mythic_v25_pilot_level03_body_sknp"
@@ -146,8 +152,9 @@ The checked-in `.gitignore` excludes `exports/` because exported game/model data
 Current limitations:
 
 - Unreal `.uasset` files are intentionally not parsed.
-- The shader is an approximation, not a full Substrate graph, compiler, or material layering implementation.
-- Coverage and transmittance are only initially separated; the transmittance path is a cheap Beer-Lambert visual approximation, not UE's full Substrate medium model.
+- The shader is an approximation, not a full Substrate graph compiler or UE material layering implementation.
+- Coverage and transmittance are separated in the evaluator, but the transmittance path is still a cheap Beer-Lambert visual approximation, not UE's full Substrate medium model.
+- The current graph preset has only a base Apex slab and a placeholder vertical layer path; there is no runtime node graph UI yet.
 - Translucent and additive materials use a weighted blended OIT approximation. Exact Unreal/Substrate translucency, refraction, and per-pixel linked-list transparency are not implemented.
 - The material descriptor table currently supports up to 16 material slots.
 - Skeletal playback/skinning is imported but not rendered yet.

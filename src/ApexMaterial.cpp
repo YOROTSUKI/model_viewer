@@ -255,6 +255,30 @@ std::optional<Vec3> findJsonVec3(const std::string& json, const char* name) {
     return std::nullopt;
 }
 
+bool loadSavedParametersFromSidecar(const std::string& json) {
+    bool loadSavedParameters = false;
+    if (auto value = findJsonBool(json, "loadSavedMaterialParameters")) {
+        loadSavedParameters = *value;
+    }
+
+    if (auto value = findJsonString(json, "startupParameters")) {
+        std::string normalized = toLower(*value);
+        normalized.erase(
+            std::remove_if(normalized.begin(), normalized.end(), [](unsigned char ch) {
+                return ch == ' ' || ch == '_' || ch == '-';
+            }),
+            normalized.end());
+
+        if (normalized == "saved" || normalized == "sidecar" || normalized == "previous") {
+            loadSavedParameters = true;
+        } else if (normalized == "default" || normalized == "defaults" || normalized == "fresh" || normalized == "new") {
+            loadSavedParameters = false;
+        }
+    }
+
+    return loadSavedParameters;
+}
+
 std::unordered_map<std::string, std::string> findJsonSlotOverrides(const std::string& json) {
     std::unordered_map<std::string, std::string> overrides;
     const std::string key = "\"slotOverrides\"";
@@ -418,8 +442,13 @@ void applySlotAlphaSettings(ApexMaterialSet& materialSet) {
     }
 }
 
-ApexMaterialParameters loadApexMaterialSidecar(const std::filesystem::path& sidecarPath, bool& found, std::vector<std::string>& logLines) {
+ApexMaterialParameters loadApexMaterialSidecar(
+    const std::filesystem::path& sidecarPath,
+    bool& found,
+    bool& loadSavedParameters,
+    std::vector<std::string>& logLines) {
     found = false;
+    loadSavedParameters = false;
     ApexMaterialParameters parameters;
     if (sidecarPath.empty()) {
         return parameters;
@@ -434,6 +463,14 @@ ApexMaterialParameters loadApexMaterialSidecar(const std::filesystem::path& side
     std::ostringstream buffer;
     buffer << input.rdbuf();
     const std::string json = buffer.str();
+    loadSavedParameters = loadSavedParametersFromSidecar(json);
+
+    if (!loadSavedParameters) {
+        logLines.push_back(
+            "[ApexMaterial] sidecar startupParameters=Defaults; ignoring saved material parameters: " +
+            sidecarPath.string());
+        return parameters;
+    }
 
     if (auto value = findJsonBool(json, "enableApexMaterialMode")) {
         parameters.enableApexMaterialMode = *value;
@@ -480,6 +517,10 @@ ApexMaterialParameters loadApexMaterialSidecar(const std::filesystem::path& side
     if (auto value = findJsonVec3(json, "emissiveTint")) {
         parameters.emissiveTint = *value;
     }
+    if (auto value = findJsonNumber(json, "substrateMaxClosureCount")) {
+        const int closureCount = std::clamp(static_cast<int>(*value), 1, 4);
+        parameters.substrateMaxClosureCount = static_cast<std::uint32_t>(closureCount);
+    }
     if (auto debugViewString = findJsonString(json, "debugView")) {
         if (auto view = apexMaterialDebugViewFromString(*debugViewString)) {
             parameters.debugView = *view;
@@ -491,7 +532,7 @@ ApexMaterialParameters loadApexMaterialSidecar(const std::filesystem::path& side
         }
     }
 
-    logLines.push_back("[ApexMaterial] loaded sidecar: " + sidecarPath.string());
+    logLines.push_back("[ApexMaterial] loaded saved material parameters: " + sidecarPath.string());
     return parameters;
 }
 
@@ -609,6 +650,14 @@ const char* apexMaterialDebugViewName(ApexMaterialDebugView view) {
         return "Tangent Validity";
     case ApexMaterialDebugView::Transmittance:
         return "Transmittance";
+    case ApexMaterialDebugView::MeanFreePath:
+        return "Mean Free Path";
+    case ApexMaterialDebugView::MediumThickness:
+        return "Medium Thickness";
+    case ApexMaterialDebugView::ClosureCount:
+        return "Closure Count";
+    case ApexMaterialDebugView::LayeredTransmittance:
+        return "Layered Transmittance";
     case ApexMaterialDebugView::Count:
         break;
     }
@@ -735,6 +784,18 @@ std::optional<ApexMaterialDebugView> apexMaterialDebugViewFromString(std::string
     if (value == "transmittance" || value == "transmission") {
         return ApexMaterialDebugView::Transmittance;
     }
+    if (value == "meanfreepath" || value == "mfp") {
+        return ApexMaterialDebugView::MeanFreePath;
+    }
+    if (value == "mediumthickness" || value == "mediumdepth") {
+        return ApexMaterialDebugView::MediumThickness;
+    }
+    if (value == "closurecount" || value == "layercount" || value == "closures" || value == "layers") {
+        return ApexMaterialDebugView::ClosureCount;
+    }
+    if (value == "layeredtransmittance" || value == "layertransmittance" || value == "layertransmission") {
+        return ApexMaterialDebugView::LayeredTransmittance;
+    }
     return std::nullopt;
 }
 
@@ -794,7 +855,11 @@ ApexMaterialSet scanApexMaterialsForModel(const std::filesystem::path& modelOrDi
     materialSet.sidecarPath = makeSidecarPath(sidecarAnchor);
 
     bool sidecarFound = false;
-    materialSet.parameters = loadApexMaterialSidecar(materialSet.sidecarPath, sidecarFound, materialSet.logLines);
+    materialSet.parameters = loadApexMaterialSidecar(
+        materialSet.sidecarPath,
+        sidecarFound,
+        materialSet.loadSavedMaterialParameters,
+        materialSet.logLines);
     if (sidecarFound) {
         std::ifstream input(materialSet.sidecarPath);
         std::ostringstream buffer;
@@ -901,7 +966,7 @@ ApexMaterialSet scanApexMaterialsForModel(const std::filesystem::path& modelOrDi
         }
     }
 
-    if (!sidecarFound) {
+    if (!sidecarFound || !materialSet.loadSavedMaterialParameters) {
         materialSet.parameters.enableApexMaterialMode = hasAnyTexture;
     }
     materialSet.logLines.push_back(
@@ -920,7 +985,11 @@ ApexMaterialSet scanApexMaterialsInDirectory(
     materialSet.sidecarPath = makeSidecarPath(sidecarAnchorPath.empty() ? directory : sidecarAnchorPath);
 
     bool sidecarFound = false;
-    materialSet.parameters = loadApexMaterialSidecar(materialSet.sidecarPath, sidecarFound, materialSet.logLines);
+    materialSet.parameters = loadApexMaterialSidecar(
+        materialSet.sidecarPath,
+        sidecarFound,
+        materialSet.loadSavedMaterialParameters,
+        materialSet.logLines);
     if (sidecarFound) {
         std::ifstream input(materialSet.sidecarPath);
         std::ostringstream buffer;
@@ -1012,7 +1081,7 @@ ApexMaterialSet scanApexMaterialsInDirectory(
             }
         }
     }
-    if (!sidecarFound) {
+    if (!sidecarFound || !materialSet.loadSavedMaterialParameters) {
         materialSet.parameters.enableApexMaterialMode = hasAnyTexture;
     }
 
@@ -1035,6 +1104,7 @@ void saveApexMaterialSidecar(const ApexMaterialSet& materialSet) {
 
     const ApexMaterialParameters& p = materialSet.parameters;
     output << "{\n";
+    output << "  \"startupParameters\": \"" << (materialSet.loadSavedMaterialParameters ? "Saved" : "Defaults") << "\",\n";
     output << "  \"enableApexMaterialMode\": " << (p.enableApexMaterialMode ? "true" : "false") << ",\n";
     output << "  \"flipNormalGreen\": " << (p.flipNormalGreen ? "true" : "false") << ",\n";
     output << "  \"roughnessMultiplier\": " << p.roughnessMultiplier << ",\n";
@@ -1050,6 +1120,7 @@ void saveApexMaterialSidecar(const ApexMaterialSet& materialSet) {
     output << "  \"enableAnisotropy\": " << (p.enableAnisotropy ? "true" : "false") << ",\n";
     output << "  \"anisotropyStrength\": " << p.anisotropyStrength << ",\n";
     output << "  \"emissiveTint\": [" << p.emissiveTint.x << ", " << p.emissiveTint.y << ", " << p.emissiveTint.z << "],\n";
+    output << "  \"substrateMaxClosureCount\": " << p.substrateMaxClosureCount << ",\n";
     output << "  \"debugView\": \"" << apexMaterialDebugViewName(p.debugView) << "\",\n";
     output << "  \"slotOverrides\": {\n";
 
@@ -1119,6 +1190,19 @@ std::string formatApexMaterialLog(const ApexMaterialSet& materialSet) {
         output << line << '\n';
     }
 
+    output << "[ApexMaterial] substrate max closure count: "
+           << std::clamp(materialSet.parameters.substrateMaxClosureCount, 1u, 4u) << '\n';
+    output << "[ApexMaterial] startup parameters: "
+           << (materialSet.loadSavedMaterialParameters ? "Saved" : "Defaults") << '\n';
+    output << "[ApexMaterial] detected texture slots:";
+    if (materialSet.detectedTextureSlots.empty()) {
+        output << " <none>";
+    } else {
+        for (const std::string& slotName : materialSet.detectedTextureSlots) {
+            output << ' ' << slotName;
+        }
+    }
+    output << '\n';
     output << "[ApexMaterial] slots:\n";
     for (const ApexMaterialSlot& slot : materialSet.slots) {
         output << "  - " << slot.name

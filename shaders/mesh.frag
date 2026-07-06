@@ -36,12 +36,13 @@ void main() {
     }
 
     TangentFrame baseFrame = buildTangentFrame(geometricNormal, inTangent, inWorldPos, uv);
-    SubstrateSlabApprox slab = buildSubstrateSlabApprox(material, baseFrame);
+    SubstrateSlabApprox slab = buildApexSubstrateGraphApprox(material, baseFrame);
+    SubstrateEvalResult evalResult = evaluateSubstrateGraphApprox(slab, inWorldPos);
     vec3 color = materialDebugView() == DEBUG_FINAL_LIT
-        ? evaluateSubstrateSlabApprox(slab, inWorldPos)
-        : debugColorForDisplay(slab, inWorldPos);
+        ? evalResult.radiance
+        : debugColorForDisplay(slab, evalResult);
 
-    float coverage = material.coverage;
+    float coverage = evalResult.coverage;
     if (drawPush.alphaMode == ALPHA_OPAQUE || drawPush.alphaMode == ALPHA_MASKED) {
         coverage = 1.0;
     }

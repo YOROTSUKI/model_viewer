@@ -67,6 +67,10 @@ enum class ApexMaterialDebugView : std::uint32_t {
     ScatterThickness,
     TangentValidity,
     Transmittance,
+    MeanFreePath,
+    MediumThickness,
+    ClosureCount,
+    LayeredTransmittance,
     Count,
 };
 
@@ -86,6 +90,7 @@ struct ApexMaterialParameters {
     float subsurfaceThicknessScale = 1.0f;
     float anisotropyStrength = 0.25f;
     Vec3 emissiveTint{1.0f, 1.0f, 1.0f};
+    std::uint32_t substrateMaxClosureCount = 1;
     ApexMaterialDebugView debugView = ApexMaterialDebugView::FinalLit;
 };
 
@@ -114,6 +119,7 @@ struct ApexMaterialSet {
     std::filesystem::path sourceDirectory;
     std::filesystem::path sidecarPath;
     ApexMaterialParameters parameters;
+    bool loadSavedMaterialParameters = false;
     std::vector<ApexMaterialSlot> slots;
     std::vector<std::string> detectedTextureSlots;
     std::vector<std::string> logLines;

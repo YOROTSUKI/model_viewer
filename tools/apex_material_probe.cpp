@@ -2,11 +2,14 @@
 #include "Model.h"
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -124,7 +127,7 @@ bool debugViewParserSmokeTest() {
         std::uint32_t value;
     };
 
-    constexpr std::array<ExpectedDebugView, 17> expected = {{
+    constexpr std::array<ExpectedDebugView, 25> expected = {{
         {"Final Lit", viewer::ApexMaterialDebugView::FinalLit, 0},
         {"Base Color", viewer::ApexMaterialDebugView::BaseColor, 1},
         {"Normal", viewer::ApexMaterialDebugView::Normal, 2},
@@ -142,6 +145,14 @@ bool debugViewParserSmokeTest() {
         {"Tangent Validity", viewer::ApexMaterialDebugView::TangentValidity, 12},
         {"Transmittance", viewer::ApexMaterialDebugView::Transmittance, 13},
         {"transmission", viewer::ApexMaterialDebugView::Transmittance, 13},
+        {"Mean Free Path", viewer::ApexMaterialDebugView::MeanFreePath, 14},
+        {"mfp", viewer::ApexMaterialDebugView::MeanFreePath, 14},
+        {"Medium Thickness", viewer::ApexMaterialDebugView::MediumThickness, 15},
+        {"medium_depth", viewer::ApexMaterialDebugView::MediumThickness, 15},
+        {"Closure Count", viewer::ApexMaterialDebugView::ClosureCount, 16},
+        {"Layer Count", viewer::ApexMaterialDebugView::ClosureCount, 16},
+        {"Layered Transmittance", viewer::ApexMaterialDebugView::LayeredTransmittance, 17},
+        {"layer_transmission", viewer::ApexMaterialDebugView::LayeredTransmittance, 17},
     }};
 
     for (const ExpectedDebugView& item : expected) {
@@ -156,7 +167,7 @@ bool debugViewParserSmokeTest() {
         }
     }
 
-    if (static_cast<std::uint32_t>(viewer::ApexMaterialDebugView::Count) != 14) {
+    if (static_cast<std::uint32_t>(viewer::ApexMaterialDebugView::Count) != 18) {
         std::cerr << "self-test failed: debug view count drifted without updating shader constants test\n";
         return false;
     }
@@ -192,11 +203,110 @@ bool textureScannerSmokeTest() {
     return true;
 }
 
+bool startupParameterModeSmokeTest() {
+    namespace fs = std::filesystem;
+
+    const fs::path root =
+        fs::temp_directory_path() /
+        ("apex_material_probe_startup_" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const fs::path sidecarAnchor = root / "model.cast";
+    const fs::path sidecarPath = root / "model.apexmat.json";
+    const fs::path texturePath = root / "T_body_sknp_col.png";
+
+    auto cleanup = [&root]() {
+        std::error_code cleanupError;
+        fs::remove_all(root, cleanupError);
+    };
+
+    auto fail = [&cleanup](const char* message) {
+        std::cerr << "self-test failed: " << message << '\n';
+        cleanup();
+        return false;
+    };
+
+    std::error_code error;
+    fs::create_directories(root, error);
+    if (error) {
+        return fail("could not create startup parameter temp directory");
+    }
+    {
+        std::ofstream texture(texturePath, std::ios::binary);
+        if (!texture) {
+            return fail("could not create startup parameter temp texture");
+        }
+    }
+
+    auto writeSidecar = [&sidecarPath](std::string_view startupParameters) {
+        std::ofstream output(sidecarPath);
+        if (!output) {
+            return false;
+        }
+        output << "{\n";
+        if (!startupParameters.empty()) {
+            output << "  \"startupParameters\": \"" << startupParameters << "\",\n";
+        }
+        output << "  \"enableApexMaterialMode\": false,\n";
+        output << "  \"roughnessMultiplier\": 0.12,\n";
+        output << "  \"alphaCutoff\": 0.75,\n";
+        output << "  \"subsurfaceStrength\": 0.44,\n";
+        output << "  \"substrateMaxClosureCount\": 3\n";
+        output << "}\n";
+        return static_cast<bool>(output);
+    };
+
+    viewer::LoadedModel model;
+    model.name = "model";
+
+    if (!writeSidecar("")) {
+        return fail("could not write default startup sidecar");
+    }
+    viewer::ApexMaterialSet defaultStartupSet = viewer::scanApexMaterialsInDirectory(root, model, sidecarAnchor);
+    const viewer::ApexMaterialParameters defaultParameters;
+    if (defaultStartupSet.loadSavedMaterialParameters) {
+        return fail("sidecar without startupParameters should not load saved material parameters");
+    }
+    if (!nearlyEqual(defaultStartupSet.parameters.roughnessMultiplier, defaultParameters.roughnessMultiplier) ||
+        !nearlyEqual(defaultStartupSet.parameters.alphaCutoff, defaultParameters.alphaCutoff) ||
+        !nearlyEqual(defaultStartupSet.parameters.subsurfaceStrength, defaultParameters.subsurfaceStrength)) {
+        return fail("default startup mode reused saved material parameters");
+    }
+    if (defaultStartupSet.parameters.substrateMaxClosureCount != defaultParameters.substrateMaxClosureCount) {
+        return fail("default startup mode reused saved substrate closure budget");
+    }
+    if (!defaultStartupSet.parameters.enableApexMaterialMode) {
+        return fail("default startup mode did not enable Apex mode for detected textures");
+    }
+
+    if (!writeSidecar("Saved")) {
+        return fail("could not write saved startup sidecar");
+    }
+    viewer::ApexMaterialSet savedStartupSet = viewer::scanApexMaterialsInDirectory(root, model, sidecarAnchor);
+    if (!savedStartupSet.loadSavedMaterialParameters) {
+        return fail("Saved startup mode did not opt into saved material parameters");
+    }
+    if (!nearlyEqual(savedStartupSet.parameters.roughnessMultiplier, 0.12f) ||
+        !nearlyEqual(savedStartupSet.parameters.alphaCutoff, 0.75f) ||
+        !nearlyEqual(savedStartupSet.parameters.subsurfaceStrength, 0.44f)) {
+        return fail("Saved startup mode did not reuse saved material parameters");
+    }
+    if (savedStartupSet.parameters.substrateMaxClosureCount != 3) {
+        return fail("Saved startup mode did not reuse saved substrate closure budget");
+    }
+    if (savedStartupSet.parameters.enableApexMaterialMode) {
+        return fail("Saved startup mode ignored saved Apex mode flag");
+    }
+
+    cleanup();
+    return true;
+}
+
 int runSelfTest() {
     if (!tangentGenerationSmokeTest() ||
         !degenerateUvTangentFallbackSmokeTest() ||
         !mirroredUvTangentSmokeTest() ||
         !textureScannerSmokeTest() ||
+        !startupParameterModeSmokeTest() ||
         !debugViewParserSmokeTest()) {
         return 1;
     }

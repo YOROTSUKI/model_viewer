@@ -2218,7 +2218,7 @@ void VulkanRenderer::updateUniformBuffer(std::uint32_t currentImage, const Camer
     };
     ubo.apexDebug = {
         static_cast<float>(static_cast<std::uint32_t>(p.debugView)),
-        0.0f,
+        static_cast<float>(std::clamp(p.substrateMaxClosureCount, 1u, 4u)),
         0.0f,
         0.0f,
     };

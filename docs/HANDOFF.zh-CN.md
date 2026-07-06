@@ -193,6 +193,8 @@ Dear ImGui 面板名为 `Vulkan Model Viewer`。
 - Subsurface Color / Strength / Thickness Scale
 - Enable Anisotropy
 - Anisotropy Strength
+- Substrate Max Closures
+- Load Saved Params On Startup
 
 `Bindings` tab：
 
@@ -207,6 +209,8 @@ Dear ImGui 面板名为 `Vulkan Model Viewer`。
 配置保存：
 
 - 参数保存到模型旁边的 `<model>.apexmat.json`。
+- 默认启动使用程序内置的当前材质参数，不再复用旧 sidecar 里的滑块值；需要复用旧值时，在 UI 勾选 `Load Saved Params On Startup`，或把 JSON 的 `startupParameters` 改成 `Saved`。
+- `substrateMaxClosureCount` 默认 1，可设为 1-4；1 使用单 slab 参数混合路径，2+ 启用当前简化 vertical-layer 近似路径。
 - 支持 `slotOverrides`、`slotAlphaModes`、`slotOpacitySources`、`slotOpacityChannels`。
 
 ## Vulkan 渲染管线摘要
